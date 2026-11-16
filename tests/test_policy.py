@@ -114,6 +114,69 @@ def test_eq_is_type_strict():
     assert policy.evaluate(Action(tool="x", args={"verified": 1.0})).decision == Decision.DENY
 
 
+def test_in_is_type_strict():
+    policy = Policy(
+        rules=(
+            Rule(
+                name="listed_level",
+                decision=Decision.ALLOW,
+                when={"args.level": {"in": [1]}},
+            ),
+        ),
+        default_decision=Decision.DENY,
+    )
+    assert policy.evaluate(Action(tool="x", args={"level": 1})).decision == Decision.ALLOW
+    assert policy.evaluate(Action(tool="x", args={"level": True})).decision == Decision.DENY
+
+
+def test_not_in_is_type_strict():
+    policy = Policy(
+        rules=(
+            Rule(
+                name="deny_unlisted",
+                decision=Decision.DENY,
+                when={"args.level": {"not_in": [1]}},
+            ),
+        ),
+        default_decision=Decision.ALLOW,
+    )
+    # A boolean does not equal 1, so the deny rule still fires.
+    assert policy.evaluate(Action(tool="x", args={"level": True})).decision == Decision.DENY
+    assert policy.evaluate(Action(tool="x", args={"level": 1})).decision == Decision.ALLOW
+
+
+def test_contains_is_type_strict_for_lists():
+    policy = Policy(
+        rules=(
+            Rule(
+                name="flagged",
+                decision=Decision.DENY,
+                when={"args.flags": {"contains": 1}},
+            ),
+        ),
+        default_decision=Decision.ALLOW,
+    )
+    assert policy.evaluate(Action(tool="x", args={"flags": [1]})).decision == Decision.DENY
+    assert policy.evaluate(Action(tool="x", args={"flags": [True]})).decision == Decision.ALLOW
+    # A non-string needle never matches inside a string.
+    assert policy.evaluate(Action(tool="x", args={"flags": "v1"})).decision == Decision.ALLOW
+
+
+def test_contains_keeps_substring_semantics_on_strings():
+    policy = Policy(
+        rules=(
+            Rule(
+                name="flagged",
+                decision=Decision.DENY,
+                when={"args.flags": {"contains": "1"}},
+            ),
+        ),
+        default_decision=Decision.ALLOW,
+    )
+    assert policy.evaluate(Action(tool="x", args={"flags": "v1"})).decision == Decision.DENY
+    assert policy.evaluate(Action(tool="x", args={"flags": "v2"})).decision == Decision.ALLOW
+
+
 def test_path_prefix_normalises_and_respects_boundaries():
     policy = Policy(
         rules=(

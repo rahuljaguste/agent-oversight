@@ -67,9 +67,9 @@ def _redact(value: Any, key: str | None = None) -> tuple[Any, bool]:
 
 def redact_args(args: Any) -> tuple[Any, bool]:
     """Redact secret-bearing argument values before they reach the audit log."""
-    if not isinstance(args, dict):
-        return {"_invalid_args": _normalise_key(args)}, True
-    return _redact(args)
+    if isinstance(args, (dict, list, tuple)):
+        return _redact(args)
+    return {"_invalid_args": _normalise_key(args)}, True
 
 
 def sensitive_values(args: Any) -> list[str]:

@@ -104,7 +104,7 @@ rules:
 
 Supported operators include `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `in`, `not_in`, `contains`, `not_contains`, `domain`, `not_domain`, `path_prefix`, `not_path_prefix`, `path_escape` and `exists`. See `DESIGN.md` for the semantics.
 
-Policies are validated strictly at load time. Unknown keys, unknown operators, duplicate YAML keys, duplicate rule names, empty tool scopes, non-finite thresholds and unsupported versions fail closed instead of being ignored. `in` and `not_in` take lists; `eq` and `neq` compare types strictly, so a quoted boolean does not silently disable a rule.
+Policies are validated strictly at load time. Unknown keys, unknown operators, duplicate YAML keys, duplicate rule names, empty tool scopes, non-finite thresholds and unsupported versions fail closed instead of being ignored. `in` and `not_in` take lists; `eq`, `neq`, `in`, `not_in`, `contains` and `not_contains` compare types strictly, so a quoted boolean does not silently disable a rule.
 
 Tool metadata marks reads and fetches as reversible, and sends and transfers as irreversible. The shipped policy therefore sends every send and transfer for approval.
 

@@ -343,10 +343,8 @@ def _apply(value: Any, operator: str, expected: Any) -> bool:
     if operator in {"in", "not_in"}:
         if not isinstance(expected, (list, tuple, set, frozenset)):
             raise ValueError("'in' expects a list.")
-        try:
-            return value in expected if operator == "in" else value not in expected
-        except TypeError:
-            return False
+        matched = any(_equals(value, item) for item in expected)
+        return matched if operator == "in" else not matched
     if operator == "contains":
         return _contains(value, expected)
     if operator == "not_contains":
@@ -374,10 +372,15 @@ def _equals(value: Any, expected: Any) -> bool:
 
 
 def _contains(value: Any, expected: Any) -> bool:
-    try:
-        return expected in value
-    except TypeError:
-        return False
+    """Substring check on strings, type-strict membership in lists."""
+    if isinstance(value, str):
+        try:
+            return expected in value
+        except TypeError:
+            return False
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return any(_equals(item, expected) for item in value)
+    return False
 
 
 def _number(value: Any) -> float:

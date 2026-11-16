@@ -97,21 +97,47 @@ def test_reason_and_error_text_are_redacted(tmp_path):
     policy = Policy(
         rules=(
             Rule(
-                name="numeric_token",
-                decision=Decision.DENY,
-                when={"args.token": {"gt": 1}},
+                name="token_needs_approval",
+                decision=Decision.REQUIRE_APPROVAL,
+                when={"args.token": {"exists": True}},
             ),
         ),
         default_decision=Decision.ALLOW,
     )
-    reviewer, audit_path = _reviewer(tmp_path, policy=policy)
+
+    def leaking_approver(action, result):
+        raise ValueError(f"cannot approve token={action.args['token']}")
+
+    reviewer, audit_path = _reviewer(tmp_path, policy=policy, approver=leaking_approver)
     result = reviewer.review(Action(tool="x", args={"token": "sk-live-SECRET"}))
 
     assert result.final_decision == Decision.DENY
+    assert "sk-live-SECRET" not in result.error
     record = _record(audit_path)
     assert record["args"]["token"].startswith("[redacted ")
     assert record["args_redacted"] is True
     assert "sk-live-SECRET" not in audit_path.read_text(encoding="utf-8")
+
+
+def test_unredactable_arguments_fail_closed(tmp_path):
+    permissive = Policy(rules=(), default_decision=Decision.ALLOW)
+    reviewer, audit_path = _reviewer(tmp_path, policy=permissive)
+
+    args: dict = {}
+    nested = args
+    for _ in range(50_000):
+        nested["child"] = {}
+        nested = nested["child"]
+
+    result = reviewer.review(Action(tool="read_file", args=args))
+
+    assert result.final_decision == Decision.DENY
+    assert "Redaction failed" in result.error
+    record = _record(audit_path)
+    assert record["policy_decision"] == "allow"
+    assert record["final_decision"] == "deny"
+    assert record["args"] == {"_redaction_failed": "arguments unavailable"}
+    assert record["args_redacted"] is True
 
 
 def test_policy_error_is_denied_and_audited(tmp_path):

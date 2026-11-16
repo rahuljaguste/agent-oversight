@@ -41,6 +41,13 @@ def test_non_string_keys_are_normalised():
     json.dumps(redacted)
 
 
+def test_non_dict_roots_are_redacted_not_stringified():
+    redacted, changed = redact_args([{"password": "hunter2"}, "plain"])
+    assert changed is True
+    assert redacted[0]["password"].startswith("[redacted ")
+    assert "hunter2" not in json.dumps(redacted)
+
+
 def test_sensitive_values_are_collected_for_text_redaction():
     values = sensitive_values({"body": {"html": "sk-live-SECRET"}, "to": "alice@example.com"})
     assert "sk-live-SECRET" in values

@@ -53,10 +53,17 @@ class ActionReviewer:
                 else:
                     denied_by = approval.approver
 
-        sensitive = sensitive_values(snapshot.args) + sensitive_values(snapshot.context)
-        redacted_args, args_redacted = redact_args(snapshot.args)
-        reason = redact_text(policy_result.reason, sensitive) or ""
-        error_text = redact_text(error, sensitive)
+        try:
+            sensitive = sensitive_values(snapshot.args) + sensitive_values(snapshot.context)
+            redacted_args, args_redacted = redact_args(snapshot.args)
+            reason = redact_text(policy_result.reason, sensitive) or ""
+            error_text = redact_text(error, sensitive)
+        except Exception as exc:  # fail closed if the record cannot be made auditable
+            final = Decision.DENY
+            redacted_args = {"_redaction_failed": "arguments unavailable"}
+            args_redacted = True
+            reason = ""
+            error_text = f"Redaction failed: {type(exc).__name__}"
 
         record = {
             "tool": snapshot.tool,

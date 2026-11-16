@@ -62,8 +62,8 @@ Each condition is either a scalar equality check or a mapping of operators. All 
 |---|---|
 | `eq`, `neq` | Type-strict equality and inequality; a boolean does not equal `1`, and a string does not equal `False` |
 | `gt`, `gte`, `lt`, `lte` | Numeric comparison; non-finite values and thresholds are rejected |
-| `in`, `not_in` | Membership in a list |
-| `contains`, `not_contains` | Substring or list membership |
+| `in`, `not_in` | Membership in a list, with the same type-strict comparison as `eq` |
+| `contains`, `not_contains` | Substring check on strings; type-strict membership in lists |
 | `domain`, `not_domain` | Compare every email address or URL host in a field with a domain |
 | `path_prefix`, `not_path_prefix` | Normalised path prefix check on a segment boundary |
 | `path_escape` | Whether a path is a non-string, absolute, contains a `..` component, or otherwise escapes |
