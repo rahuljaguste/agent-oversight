@@ -1,0 +1,45 @@
+version: 1
+
+# Unknown tools are allowed by default in this prototype. A production policy
+# should probably default to deny or require approval.
+default_decision: allow
+
+rules:
+  - name: deny_external_email
+    decision: deny
+    tool: send_email
+    when:
+      args.to:
+        not_domain: example.com
+    reason: Email to an external domain is not allowed without review.
+
+  - name: deny_path_escape
+    decision: deny
+    tool: read_file
+    when:
+      args.path:
+        path_escape: true
+    reason: Reading outside the sandbox is not allowed.
+
+  - name: deny_untrusted_fetch
+    decision: deny
+    tool: fetch_url
+    when:
+      args.url:
+        not_domain: docs.example.com
+    reason: Fetching a URL outside the allowlisted domain is not allowed.
+
+  - name: approve_large_transfer
+    decision: require_approval
+    tool: transfer_funds
+    when:
+      args.amount:
+        gt: 1000
+    reason: Transfers above 1000 require human approval.
+
+  - name: approve_irreversible
+    decision: require_approval
+    when:
+      reversible:
+        eq: false
+    reason: Irreversible actions require human approval.

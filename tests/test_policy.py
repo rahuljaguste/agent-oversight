@@ -1,0 +1,131 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from agent_oversight.models import Action, Decision
+from agent_oversight.policy import Policy, Rule
+
+ROOT = Path(__file__).resolve().parents[1]
+POLICY = Policy.load(ROOT / "policies" / "default.yml")
+
+
+@pytest.mark.parametrize(
+    ("tool", "args", "expected"),
+    [
+        ("send_email", {"to": "alice@example.com"}, Decision.ALLOW),
+        ("send_email", {"to": "alice@evil.example"}, Decision.DENY),
+        ("send_email", {"to": "attacker@evil.example, alice@example.com"}, Decision.DENY),
+        ("send_email", {"to": "alice@example.com, bob@example.com"}, Decision.ALLOW),
+        ("send_email", {"to": "alice@example.com; attacker@evil.example"}, Decision.DENY),
+        ("send_email", {"to": "alice@example.com\nattacker@evil.example"}, Decision.DENY),
+        ("send_email", {"to": "Alice <alice@evil.example>"}, Decision.DENY),
+        ("send_email", {"to": "Alice <alice@example.com>"}, Decision.ALLOW),
+        ("transfer_funds", {"amount": 250, "to": "treasury"}, Decision.ALLOW),
+        ("transfer_funds", {"amount": 5000, "to": "treasury"}, Decision.REQUIRE_APPROVAL),
+        ("fetch_url", {"url": "https://docs.example.com/guide"}, Decision.ALLOW),
+        ("fetch_url", {"url": "https://evil.example/collect"}, Decision.DENY),
+        ("read_file", {"path": "notes.txt"}, Decision.ALLOW),
+        ("read_file", {"path": "../../etc/passwd"}, Decision.DENY),
+        ("read_file", {"path": "/etc/passwd"}, Decision.DENY),
+        ("read_file", {"path": "C:\\Windows\\win.ini"}, Decision.DENY),
+    ],
+)
+def test_decisions(tool, args, expected):
+    assert POLICY.evaluate(Action(tool=tool, args=args)).decision == expected
+
+
+def test_irreversible_requires_approval():
+    action = Action(
+        tool="transfer_funds",
+        args={"amount": 50, "to": "treasury"},
+        reversible=False,
+    )
+    result = POLICY.evaluate(action)
+    assert result.decision == Decision.REQUIRE_APPROVAL
+    assert result.rule == "approve_irreversible"
+
+
+@pytest.mark.parametrize("amount", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_amount_is_rejected(amount):
+    action = Action(tool="transfer_funds", args={"amount": amount, "to": "treasury"})
+    with pytest.raises(ValueError):
+        POLICY.evaluate(action)
+
+
+def test_unknown_operator_raises():
+    policy = Policy(
+        rules=(Rule(name="bad", decision=Decision.DENY, when={"tool": {"nope": 1}}),),
+    )
+    with pytest.raises(ValueError):
+        policy.evaluate(Action(tool="send_email"))
+
+
+def test_path_prefix_normalises_and_respects_boundaries():
+    policy = Policy(
+        rules=(
+            Rule(
+                name="allow_sandbox",
+                decision=Decision.ALLOW,
+                when={"args.path": {"path_prefix": "/srv/sandbox"}},
+            ),
+        ),
+        default_decision=Decision.DENY,
+    )
+    allowed = [Action(tool="read_file", args={"path": "/srv/sandbox/file"})]
+    denied = [
+        Action(tool="read_file", args={"path": "/srv/sandbox-evil/secret"}),
+        Action(tool="read_file", args={"path": "/srv/sandbox/../../etc/passwd"}),
+    ]
+    assert all(policy.evaluate(action).decision == Decision.ALLOW for action in allowed)
+    assert all(policy.evaluate(action).decision == Decision.DENY for action in denied)
+
+
+def _write_policy(tmp_path: Path, text: str) -> Path:
+    path = tmp_path / "policy.yml"
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",
+        "version: 1\ndefault_decision: allow\n",
+        "version: 1\ndefault_decision: allow\nrules: []\nrule: []\n",
+        "version: 1\nrules: []\n",
+        "version: 2\ndefault_decision: allow\nrules: []\n",
+        "version: 1\ndefault_decision: allow\nrules:\n  - name: r\n    decision: allow\n"
+        "    whn: {}\n",
+        "version: 1\ndefault_decision: allow\nrules:\n  - name: r\n    decision: allow\n"
+        "    when:\n      args.to:\n        nope: 1\n",
+        "version: 1\ndefault_decision: allow\nrules:\n  - name: r\n    decision: allow\n"
+        "    when:\n      args.to: {}\n",
+        "version: 1\ndefault_decision: allow\nrules:\n  - name: r\n    decision: allow\n"
+        "    when:\n      args: {eq: x}\n",
+        "version: 1\ndefault_decision: allow\nrules:\n  - name: r\n    decision: allow\n"
+        "    when:\n      bogus: 1\n",
+        "version: 1\ndefault_decision: allow\nrules:\n  - name: r\n    decision: allow\n"
+        "  - name: r\n    decision: deny\n",
+        "version: 1\ndefault_decision: allow\nrules:\n  - name: r\n    decision: maybe\n",
+        "version: 1\ndefault_decision: allow\nrules:\n  - name: r\n    decision: allow\n"
+        "    when:\n      reversible:\n        exists: 1\n",
+        "version: 1\ndefault_decision: allow\nrules:\n  - name: r\n    decision: allow\n"
+        "    when:\n      args.to: {in: 1}\n",
+        "version: 1\ndefault_decision: allow\nrules:\n  - name: r\n    decision: allow\n"
+        '    when:\n      args.path: {path_escape: "false"}\n',
+        "version: 1\ndefault_decision: allow\nrules:\n  - name: r\n    decision: allow\n"
+        "    when:\n      args.to: {domain: 123}\n",
+        "version: 1\ndefault_decision: allow\nrules:\n  - name: r\n    decision: allow\n"
+        "    when:\n      args.amount: {gt: lots}\n",
+    ],
+)
+def test_invalid_policies_are_rejected(tmp_path, text):
+    with pytest.raises(ValueError):
+        Policy.load(_write_policy(tmp_path, text))
+
+
+def test_empty_rules_are_allowed_with_explicit_deny(tmp_path):
+    policy = Policy.load(_write_policy(tmp_path, "version: 1\ndefault_decision: deny\nrules: []\n"))
+    assert policy.evaluate(Action(tool="send_email")).decision == Decision.DENY
