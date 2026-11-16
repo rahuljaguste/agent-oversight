@@ -24,3 +24,6 @@ HANDOFF.md
 
 # OS
 .DS_Store
+
+# Local-only assistant instructions
+CLAUDE.md
