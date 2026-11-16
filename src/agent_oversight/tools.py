@@ -9,10 +9,18 @@ from .models import Action
 # Declared per tool so a live action carries the same semantics as a scenario.
 # Sending and transferring cannot be undone; reading and fetching can.
 TOOL_METADATA: dict[str, dict[str, Any]] = {
-    "read_file": {"reversible": True, "impact": "low"},
-    "send_email": {"reversible": False, "impact": "medium"},
-    "transfer_funds": {"reversible": False, "impact": "high"},
-    "fetch_url": {"reversible": True, "impact": "low"},
+    "read_file": {"reversible": True, "impact": "low", "args": {"path"}},
+    "send_email": {
+        "reversible": False,
+        "impact": "medium",
+        "args": {"to", "subject", "body"},
+    },
+    "transfer_funds": {
+        "reversible": False,
+        "impact": "high",
+        "args": {"amount", "to"},
+    },
+    "fetch_url": {"reversible": True, "impact": "low", "args": {"url"}},
 }
 
 

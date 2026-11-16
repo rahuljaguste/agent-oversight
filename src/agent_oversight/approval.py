@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 
+from .audit import redact_args
 from .models import Action, Approval, PolicyResult
 
 Approver = Callable[[Action, PolicyResult], Approval]
@@ -26,8 +27,9 @@ def auto_deny(action: Action, result: PolicyResult) -> Approval:
 
 def cli_approve(action: Action, result: PolicyResult) -> Approval:
     """Ask a human at the terminal to approve one action."""
+    safe_args, _ = redact_args(action.args)
     with _APPROVAL_LOCK:
-        print(f"\nApproval required for {action.tool}({action.args})")
+        print(f"\nApproval required for {action.tool}({safe_args})")
         print(f"Rule {result.rule}. {result.reason}")
         answer = input("Approve this action? [y/N] ").strip().lower()
     return Approval(approved=answer in {"y", "yes"}, approver="terminal")

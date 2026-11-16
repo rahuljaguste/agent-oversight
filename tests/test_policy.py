@@ -22,14 +22,27 @@ POLICY = Policy.load(ROOT / "policies" / "default.yml")
         ("send_email", {"to": "alice@example.com\nattacker@evil.example"}, Decision.DENY),
         ("send_email", {"to": "Alice <alice@evil.example>"}, Decision.DENY),
         ("send_email", {"to": "Alice <alice@example.com>"}, Decision.ALLOW),
+        (
+            "send_email",
+            {"to": "Alice <alice@example.com>, attacker@evil.example"},
+            Decision.DENY,
+        ),
+        ("send_email", {"to": ["alice@example.com", "bob@example.com"]}, Decision.ALLOW),
+        ("send_email", {"to": ["alice@example.com", "attacker@evil.example"]}, Decision.DENY),
         ("transfer_funds", {"amount": 250, "to": "treasury"}, Decision.ALLOW),
         ("transfer_funds", {"amount": 5000, "to": "treasury"}, Decision.REQUIRE_APPROVAL),
         ("fetch_url", {"url": "https://docs.example.com/guide"}, Decision.ALLOW),
         ("fetch_url", {"url": "https://evil.example/collect"}, Decision.DENY),
+        ("fetch_url", {"url": "https://evil.example/?q=<docs.example.com>"}, Decision.DENY),
+        ("fetch_url", {"url": "https:evil.example/path@docs.example.com"}, Decision.DENY),
+        ("fetch_url", {"url": "//evil.example/?q=a@docs.example.com"}, Decision.DENY),
+        ("fetch_url", {"url": "https://evil.example\\@docs.example.com/"}, Decision.DENY),
+        ("fetch_url", {"url": "https://evil.example\\.docs.example.com/"}, Decision.DENY),
         ("read_file", {"path": "notes.txt"}, Decision.ALLOW),
         ("read_file", {"path": "../../etc/passwd"}, Decision.DENY),
         ("read_file", {"path": "/etc/passwd"}, Decision.DENY),
         ("read_file", {"path": "C:\\Windows\\win.ini"}, Decision.DENY),
+        ("read_file", {"path": ["/etc/passwd"]}, Decision.DENY),
     ],
 )
 def test_decisions(tool, args, expected):
@@ -62,6 +75,45 @@ def test_unknown_operator_raises():
         policy.evaluate(Action(tool="send_email"))
 
 
+def test_null_condition_never_matches():
+    policy = Policy(
+        rules=(Rule(name="null", decision=Decision.ALLOW, when={"args.to": None}),),
+        default_decision=Decision.DENY,
+    )
+    assert policy.evaluate(Action(tool="send_email", args={})).decision == Decision.DENY
+
+
+def test_in_matches_lists_only():
+    policy = Policy(
+        rules=(
+            Rule(
+                name="allow_admin",
+                decision=Decision.ALLOW,
+                when={"args.role": {"in": ["admin", "owner"]}},
+            ),
+        ),
+        default_decision=Decision.DENY,
+    )
+    assert policy.evaluate(Action(tool="x", args={"role": "admin"})).decision == Decision.ALLOW
+    assert policy.evaluate(Action(tool="x", args={"role": "a"})).decision == Decision.DENY
+
+
+def test_eq_is_type_strict():
+    policy = Policy(
+        rules=(
+            Rule(
+                name="verified",
+                decision=Decision.ALLOW,
+                when={"args.verified": {"eq": True}},
+            ),
+        ),
+        default_decision=Decision.DENY,
+    )
+    assert policy.evaluate(Action(tool="x", args={"verified": True})).decision == Decision.ALLOW
+    assert policy.evaluate(Action(tool="x", args={"verified": 1})).decision == Decision.DENY
+    assert policy.evaluate(Action(tool="x", args={"verified": 1.0})).decision == Decision.DENY
+
+
 def test_path_prefix_normalises_and_respects_boundaries():
     policy = Policy(
         rules=(
@@ -77,6 +129,7 @@ def test_path_prefix_normalises_and_respects_boundaries():
     denied = [
         Action(tool="read_file", args={"path": "/srv/sandbox-evil/secret"}),
         Action(tool="read_file", args={"path": "/srv/sandbox/../../etc/passwd"}),
+        Action(tool="read_file", args={"path": ["/srv/sandbox/file"]}),
     ]
     assert all(policy.evaluate(action).decision == Decision.ALLOW for action in allowed)
     assert all(policy.evaluate(action).decision == Decision.DENY for action in denied)
@@ -112,13 +165,24 @@ def _write_policy(tmp_path: Path, text: str) -> Path:
         "version: 1\ndefault_decision: allow\nrules:\n  - name: r\n    decision: allow\n"
         "    when:\n      reversible:\n        exists: 1\n",
         "version: 1\ndefault_decision: allow\nrules:\n  - name: r\n    decision: allow\n"
-        "    when:\n      args.to: {in: 1}\n",
+        "    when:\n      args.role: {in: 1}\n",
         "version: 1\ndefault_decision: allow\nrules:\n  - name: r\n    decision: allow\n"
-        '    when:\n      args.path: {path_escape: "false"}\n',
+        "    when:\n      args.role: {in: admin}\n",
         "version: 1\ndefault_decision: allow\nrules:\n  - name: r\n    decision: allow\n"
-        "    when:\n      args.to: {domain: 123}\n",
+        '    when:\n      reversible: {eq: "false"}\n',
         "version: 1\ndefault_decision: allow\nrules:\n  - name: r\n    decision: allow\n"
-        "    when:\n      args.amount: {gt: lots}\n",
+        "    tool:\n",
+        "version: 1\ndefault_decision: allow\nrules:\n  - name: r\n    decision: allow\n"
+        '    tool: ""\n',
+        "version: 1\ndefault_decision: allow\nrules:\n  - name: r\n    decision: allow\n"
+        "    when:\n      args.to: null\n",
+        "version: 1\ndefault_decision: allow\nrules:\n  - name: r\n    decision: allow\n"
+        "    when:\n      args.amount: {gt: .nan}\n",
+        "version: 1\ndefault_decision: allow\nrules:\n  - name: r\n    decision: allow\n"
+        "    when:\n      args.amount: {gt: .inf}\n",
+        "version: 1\ndefault_decision: deny\ndefault_decision: allow\nrules: []\n",
+        "version: 1\ndefault_decision: allow\nrules:\n  - name: r\n    decision: allow\n"
+        "    when:\n      args.amount:\n        gt: 1\n        gt: 2\n",
     ],
 )
 def test_invalid_policies_are_rejected(tmp_path, text):

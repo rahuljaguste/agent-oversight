@@ -27,6 +27,9 @@ agent-oversight = "agent_oversight.cli:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/agent_oversight"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"policies/default.yml" = "agent_oversight/policies/default.yml"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"

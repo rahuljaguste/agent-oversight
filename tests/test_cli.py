@@ -4,7 +4,10 @@ import json
 
 import pytest
 
+from agent_oversight.approval import cli_approve
 from agent_oversight.cli import _parse_args, _parse_bool, _parse_impact, main
+from agent_oversight.models import Decision, PolicyResult
+from agent_oversight.tools import build_action
 
 
 @pytest.mark.parametrize(
@@ -91,3 +94,23 @@ def test_cli_denies_absolute_path(tmp_path):
     record = json.loads(audit.read_text(encoding="utf-8").strip())
     assert record["rule"] == "deny_path_escape"
     assert record["final_decision"] == "deny"
+
+
+def test_cli_approval_redacts_secret(monkeypatch, capsys):
+    action = build_action(
+        "send_email",
+        {"to": "alice@example.com", "subject": "Status", "body": "sk-live-SECRET"},
+    )
+    result = PolicyResult(
+        decision=Decision.REQUIRE_APPROVAL,
+        rule="approve_irreversible",
+        reason="needs approval",
+    )
+    monkeypatch.setattr("builtins.input", lambda _prompt: "y")
+
+    approval = cli_approve(action, result)
+
+    output = capsys.readouterr().out
+    assert approval.approved is True
+    assert "sk-live-SECRET" not in output
+    assert "[redacted" in output

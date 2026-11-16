@@ -11,10 +11,10 @@ from .approval import auto_approve, cli_approve
 from .audit import AuditLogger
 from .models import Decision
 from .policy import Policy
+from .resources import default_policy_path
 from .review import ActionReviewer
 from .tools import build_action
 
-ROOT = Path(__file__).resolve().parents[2]
 _IMPACTS = {"low", "medium", "high"}
 
 
@@ -81,8 +81,10 @@ def main(argv: list[str] | None = None) -> int:
         metavar="KEY=VALUE",
         help="Tool argument. 'reversible' and 'impact' override the tool metadata.",
     )
-    check.add_argument("--policy", default=str(ROOT / "policies" / "default.yml"))
-    check.add_argument("--audit", default=str(ROOT / "runs" / "audit.jsonl"))
+    check.add_argument(
+        "--policy", default=None, help="Policy file. Defaults to the shipped policy."
+    )
+    check.add_argument("--audit", default=None, help="Audit file. Defaults to ./runs/audit.jsonl.")
     check.add_argument("--user", default="cli")
     check.add_argument("--auto-approve", action="store_true")
 
@@ -92,8 +94,8 @@ def main(argv: list[str] | None = None) -> int:
         nargs="?",
         default="Send an email to alice@example.com and transfer 5000 to treasury.",
     )
-    demo.add_argument("--policy", default=str(ROOT / "policies" / "default.yml"))
-    demo.add_argument("--audit", default=str(ROOT / "runs" / "audit.jsonl"))
+    demo.add_argument("--policy", default=None)
+    demo.add_argument("--audit", default=None)
     demo.add_argument("--auto-approve", action="store_true")
 
     args = parser.parse_args(argv)
@@ -113,9 +115,14 @@ def main(argv: list[str] | None = None) -> int:
             reversible=reversible,
             impact=impact,
         )
+        try:
+            policy = Policy.load(args.policy or default_policy_path())
+        except (OSError, ValueError) as exc:
+            print(f"Policy error: {exc}")
+            return 2
         reviewer = ActionReviewer(
-            Policy.load(args.policy),
-            AuditLogger(args.audit),
+            policy,
+            AuditLogger(args.audit or Path.cwd() / "runs" / "audit.jsonl"),
             approver=auto_approve if args.auto_approve else cli_approve,
         )
         result = reviewer.review(action)
@@ -138,12 +145,16 @@ def main(argv: list[str] | None = None) -> int:
         print('Install the project with: pip install -e ".[dev]"')
         return 2
 
-    output = run_demo(
-        args.prompt,
-        policy_path=args.policy,
-        audit_path=args.audit,
-        auto=args.auto_approve,
-    )
+    try:
+        output = run_demo(
+            args.prompt,
+            policy_path=args.policy,
+            audit_path=args.audit,
+            auto=args.auto_approve,
+        )
+    except (OSError, ValueError) as exc:
+        print(f"Demo error: {exc}")
+        return 2
     print(output)
     return 0
 

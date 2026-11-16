@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import inspect
 import time
+from copy import deepcopy
+from dataclasses import replace
 
 from .approval import Approver, auto_deny
-from .audit import AuditLogger, redact_args
+from .audit import AuditLogger, redact_args, redact_text, sensitive_values
 from .models import Action, Approval, Decision, PolicyResult, ReviewResult
 from .policy import Policy
 
@@ -25,7 +27,8 @@ class ActionReviewer:
         self.approver = approver or auto_deny
 
     def review(self, action: Action) -> ReviewResult:
-        policy_result, policy_latency_ms, error = self._evaluate(action)
+        snapshot = self._snapshot(action)
+        policy_result, policy_latency_ms, error = self._evaluate(snapshot)
 
         final = policy_result.decision
         approved_by: str | None = None
@@ -33,7 +36,10 @@ class ActionReviewer:
         approval_latency_ms = 0.0
 
         if final == Decision.REQUIRE_APPROVAL:
-            approval, approval_latency_ms, approval_error = self._ask(action, policy_result)
+            approver_action = self._snapshot(snapshot)
+            approval, approval_latency_ms, approval_error = self._ask(
+                approver_action, policy_result
+            )
             if approval_error is not None:
                 final = Decision.DENY
                 error = approval_error
@@ -47,21 +53,25 @@ class ActionReviewer:
                 else:
                     denied_by = approval.approver
 
-        redacted_args, args_redacted = redact_args(action.args)
+        sensitive = sensitive_values(snapshot.args) + sensitive_values(snapshot.context)
+        redacted_args, args_redacted = redact_args(snapshot.args)
+        reason = redact_text(policy_result.reason, sensitive) or ""
+        error_text = redact_text(error, sensitive)
+
         record = {
-            "tool": action.tool,
+            "tool": snapshot.tool,
             "args": redacted_args,
             "args_redacted": args_redacted,
-            "user": action.user,
-            "reversible": action.reversible,
-            "impact": action.impact,
+            "user": snapshot.user,
+            "reversible": snapshot.reversible,
+            "impact": snapshot.impact,
             "policy_decision": policy_result.decision.value,
             "final_decision": final.value,
             "rule": policy_result.rule,
-            "reason": policy_result.reason,
+            "reason": reason,
             "approved_by": approved_by,
             "denied_by": denied_by,
-            "error": error,
+            "error": error_text,
             "policy_latency_ms": round(policy_latency_ms, 3),
             "approval_latency_ms": round(approval_latency_ms, 3),
         }
@@ -69,19 +79,29 @@ class ActionReviewer:
         if self.audit:
             try:
                 self.audit.log(record)
-            except OSError as exc:
+            except Exception as exc:  # fail closed if the record cannot be written
                 final = Decision.DENY
-                error = f"Audit write failed: {exc}"
+                error_text = f"Audit write failed: {type(exc).__name__}"
 
         return ReviewResult(
-            action=action,
-            policy=policy_result,
+            action=snapshot,
+            policy=replace(policy_result, reason=reason),
             final_decision=final,
             approved_by=approved_by,
             denied_by=denied_by,
-            error=error,
+            error=error_text,
             latency_ms=policy_latency_ms,
         )
+
+    def _snapshot(self, action: Action) -> Action:
+        try:
+            return replace(
+                action,
+                args=deepcopy(action.args),
+                context=deepcopy(action.context),
+            )
+        except Exception:
+            return replace(action, args=dict(action.args), context=dict(action.context))
 
     def _evaluate(self, action: Action) -> tuple[PolicyResult, float, str | None]:
         started = time.perf_counter()
@@ -120,4 +140,8 @@ class ActionReviewer:
                 latency_ms,
                 f"Approver returned {type(approval).__name__}, expected Approval.",
             )
+        if not isinstance(approval.approved, bool):
+            return None, latency_ms, "Approver returned a non-boolean decision."
+        if not isinstance(approval.approver, str) or not approval.approver.strip():
+            return None, latency_ms, "Approver returned an empty identity."
         return approval, latency_ms, None

@@ -43,6 +43,12 @@ class Approval:
     approved: bool
     approver: str
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.approved, bool):
+            raise TypeError("Approval.approved must be a bool.")
+        if not isinstance(self.approver, str) or not self.approver.strip():
+            raise ValueError("Approval.approver must be a non-empty string.")
+
 
 @dataclass(frozen=True)
 class ReviewResult:

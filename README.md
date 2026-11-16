@@ -34,6 +34,7 @@ The agent is built with the OpenAI Agents SDK. Each tool call is wrapped by the 
 - An offline eval harness with labeled scenarios and pass/fail metrics
 - Red-team cases for prompt injection, path escape, external email and untrusted fetch
 - A clean separation between the agent, the review layer and the audit log
+- Fail-closed policy loading, policy evaluation, approval and audit writing
 - A reproducible latency benchmark with measured p50, p95 and p99 numbers
 
 ## Quickstart
@@ -50,6 +51,8 @@ ruff check .
 ruff format --check .
 python evals/run.py
 ```
+
+A wheel install (`pip install .`) also ships the default policy, so `agent-oversight check` works outside the repository. CI builds and exercises the wheel.
 
 The tests and evals run offline. The interactive demo needs a model. It works with OpenAI or any OpenAI-compatible endpoint:
 
@@ -101,7 +104,7 @@ rules:
 
 Supported operators include `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `in`, `not_in`, `contains`, `not_contains`, `domain`, `not_domain`, `path_prefix`, `not_path_prefix`, `path_escape` and `exists`. See `DESIGN.md` for the semantics.
 
-Policies are validated strictly at load time. Unknown keys, unknown operators, duplicate rule names and unsupported versions fail closed instead of being ignored.
+Policies are validated strictly at load time. Unknown keys, unknown operators, duplicate YAML keys, duplicate rule names, empty tool scopes, non-finite thresholds and unsupported versions fail closed instead of being ignored. `in` and `not_in` take lists; `eq` and `neq` compare types strictly, so a quoted boolean does not silently disable a rule.
 
 Tool metadata marks reads and fetches as reversible, and sends and transfers as irreversible. The shipped policy therefore sends every send and transfer for approval.
 
@@ -113,7 +116,7 @@ The eval harness loads labeled scenarios from `evals/scenarios.yml`, evaluates e
 python evals/run.py
 ```
 
-The eval set has fourteen labeled scenarios. They are synthetic and exercise the policy surface; they are not an estimate of real-world attack rates.
+The eval set has sixteen labeled scenarios. Each scenario may also name the rule that must fire, and the harness rejects undeclared tools, unknown tool arguments and mismatched rule names. The scenarios are synthetic and exercise the policy surface; they are not an estimate of real-world attack rates.
 
 ## Measured latency
 
@@ -121,21 +124,21 @@ The review layer is in-process. This table measures the decision path, not the m
 
 | Case | Mode | p50 (µs) | p95 (µs) | p99 (µs) |
 |---|---|---:|---:|---:|
-| allow (`read_file`) | policy only | 3.83 | 4.08 | 4.25 |
-| allow (`read_file`) | review, no audit | 6.21 | 6.54 | 8.25 |
-| allow (`read_file`) | review + audit | 53.83 | 71.04 | 86.83 |
-| deny (external email) | policy only | 2.71 | 2.79 | 2.96 |
-| deny (external email) | review, no audit | 5.58 | 6.04 | 7.58 |
-| deny (external email) | review + audit | 53.67 | 67.00 | 89.58 |
-| approval (transfer 5000) | policy only | 1.62 | 1.71 | 1.79 |
-| approval (transfer 5000) | review, no audit | 4.79 | 5.08 | 7.54 |
-| approval (transfer 5000) | review + audit | 53.00 | 67.46 | 95.12 |
+| allow (`read_file`) | policy only | 3.96 | 4.12 | 4.38 |
+| allow (`read_file`) | review, no audit | 11.33 | 11.88 | 15.21 |
+| allow (`read_file`) | review + audit | 61.17 | 76.79 | 106.62 |
+| deny (external email) | policy only | 8.71 | 9.08 | 9.50 |
+| deny (external email) | review, no audit | 17.83 | 19.00 | 24.25 |
+| deny (external email) | review + audit | 69.79 | 81.38 | 124.42 |
+| approval (transfer 5000) | policy only | 1.62 | 1.67 | 1.75 |
+| approval (transfer 5000) | review, no audit | 13.25 | 13.83 | 17.67 |
+| approval (transfer 5000) | review + audit | 63.38 | 73.92 | 113.42 |
 
-Reproduce with `python benchmarks/latency.py`. Measured on an Apple M1 Pro, macOS 27.2.1, Python 3.15.0, with 20,000 iterations per case after 1,000 warm-up iterations in a single process. A second run matched these p50/p95/p99 values within a few percent. The benchmark uses synthetic actions and no network or model calls.
+Reproduce with `python benchmarks/latency.py`. Measured on an Apple M1 Pro, macOS 27.2.1, Python 3.15.0, with 20,000 iterations per case after 1,000 warm-up iterations in a single process. A second run reproduced these p50 values within a few percent; p95 and p99 are noisier, especially for the no-audit review rows, and should be read as indicative. The benchmark uses synthetic actions and no network or model calls.
 
 "Policy only" is `Policy.evaluate`. "Review, no audit" adds the reviewer, redaction and final decision with an in-memory approver. "Review + audit" additionally opens, serialises and appends one JSONL record per call. Auto-approval is effectively free, so the approval row does not include human latency.
 
-The audit write is the dominant local cost at about 48 µs per call, because the prototype opens the file for every record. A production control plane would buffer writes or ship records to a log service. The inline policy decision itself is about 2–4 µs at p50 on this machine.
+The audit write is the dominant local cost at about 50 µs per call, because the prototype opens the file for every record. A production control plane would buffer writes or ship records to a log service. The inline policy decision itself is about 2–9 µs at p50 on this machine; email-domain parsing is the slowest of the three cases.
 
 ## Limitations
 
@@ -145,8 +148,9 @@ The audit write is the dominant local cost at about 48 µs per call, because the
 - The policy language is intentionally small. It does not model cumulative risk across a multi-step plan yet.
 - The default decision for unknown tools is allow. A production system should probably default to deny or approval.
 - The review layer is in-process. A production control plane would be a separate service with its own availability and latency budget.
-- Audit redaction is key-name based. It catches the obvious secret-bearing argument names, not arbitrary sensitive data.
-- The eval set is small and synthetic. It tests policy decisions, not the approval user interface or the model's behaviour.
+- Audit redaction is key-name based and best-effort. Values under known sensitive names are replaced, including nested values, but arbitrary sensitive data in other fields is not detected.
+- The sandbox refuses path escapes, multiply-linked files and final-component symlinks, but it is not a kernel-level confinement boundary. A residual race remains between containment resolution and the file open.
+- The eval set is small and synthetic. It tests policy decisions and rule selection, not the approval user interface or the model's behaviour.
 
 ## Roadmap
 

@@ -4,7 +4,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from agent_oversight.agent import TOOL_IMPLS, AppContext, _blocked, build_agent
+from agent_oversight.agent import (
+    TOOL_IMPLS,
+    AppContext,
+    _blocked,
+    _run_config,
+    build_agent,
+)
 from agent_oversight.models import Action, Decision, PolicyResult, ReviewResult
 from agent_oversight.sandbox import Sandbox
 from agent_oversight.tools import TOOL_METADATA
@@ -52,6 +58,8 @@ def _context(tmp_path, final_decision=Decision.ALLOW, user="tester"):
 
 def test_registries_agree():
     assert set(TOOL_IMPLS) == set(TOOL_METADATA)
+    for metadata in TOOL_METADATA.values():
+        assert isinstance(metadata.get("args"), set)
 
 
 def test_every_tool_has_a_representative_call():
@@ -78,14 +86,16 @@ def test_every_tool_is_reviewed_with_metadata(tmp_path, tool):
     assert action.context == {"scope": "test"}
 
 
-def test_denied_tool_does_not_run():
+@pytest.mark.parametrize("tool", sorted(TOOL_IMPLS))
+def test_denied_tool_does_not_run(tool):
     spy = SpyReviewer(final_decision=Decision.DENY)
     app = AppContext(reviewer=spy, sandbox=ExplodingSandbox(), user="tester")
     ctx = SimpleNamespace(context=app)
 
-    result = TOOL_IMPLS["read_file"](ctx, "notes.txt")
+    result = TOOL_IMPLS[tool](ctx, *TOOL_CALLS[tool])
 
     assert result.startswith("Denied by")
+    assert "Mock" not in result
     assert len(spy.actions) == 1
 
 
@@ -118,3 +128,31 @@ def test_blocked_message_distinguishes_policy_and_approver():
     assert policy_message.startswith("Denied by policy:")
     assert approver_message.startswith("Denied by the approver:")
     assert error_message.startswith("Denied by action review: boom")
+
+
+def test_run_config_is_none_without_custom_base(monkeypatch):
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    assert _run_config() is None
+
+
+def test_run_config_uses_chat_completions_and_disables_tracing(monkeypatch):
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.deepseek.com")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.delenv("OPENAI_AGENTS_DISABLE_TRACING", raising=False)
+
+    config = _run_config()
+
+    assert config is not None
+    assert config.tracing_disabled is True
+    assert config.model_provider._use_responses is False
+
+
+def test_run_config_honours_tracing_opt_in(monkeypatch):
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://api.deepseek.com")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("OPENAI_AGENTS_DISABLE_TRACING", "false")
+
+    config = _run_config()
+
+    assert config is not None
+    assert config.tracing_disabled is False

