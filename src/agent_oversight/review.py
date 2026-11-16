@@ -108,6 +108,8 @@ class ActionReviewer:
                 context=deepcopy(action.context),
             )
         except Exception:
+            # Only reachable for non-copyable values, which JSON arguments cannot
+            # produce; the fallback copies the top level only.
             return replace(action, args=dict(action.args), context=dict(action.context))
 
     def _evaluate(self, action: Action) -> tuple[PolicyResult, float, str | None]:

@@ -117,12 +117,13 @@ def main(argv: list[str] | None = None) -> int:
         )
         try:
             policy = Policy.load(args.policy or default_policy_path())
+            audit = AuditLogger(args.audit or Path.cwd() / "runs" / "audit.jsonl")
         except (OSError, ValueError) as exc:
-            print(f"Policy error: {exc}")
+            print(f"Setup error: {exc}")
             return 2
         reviewer = ActionReviewer(
             policy,
-            AuditLogger(args.audit or Path.cwd() / "runs" / "audit.jsonl"),
+            audit,
             approver=auto_approve if args.auto_approve else cli_approve,
         )
         result = reviewer.review(action)

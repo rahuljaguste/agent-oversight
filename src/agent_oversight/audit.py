@@ -39,6 +39,11 @@ def _normalise_key(key: Any) -> str:
     return str(key)
 
 
+def _clean_key(key: Any) -> str:
+    """Normalise a dict key and strip lone surrogates."""
+    return _clean_string(_normalise_key(key))
+
+
 def _redact(value: Any, key: str | None = None) -> tuple[Any, bool]:
     if key is not None and key.lower() in _SENSITIVE_ARG_KEYS:
         return f"[redacted {len(str(value))} chars]", True
@@ -122,7 +127,7 @@ def _json_safe(value: Any) -> Any:
     if isinstance(value, str):
         return _clean_string(value)
     if isinstance(value, dict):
-        return {_normalise_key(key): _json_safe(child) for key, child in value.items()}
+        return {_clean_key(key): _json_safe(child) for key, child in value.items()}
     if isinstance(value, (list, tuple)):
         return [_json_safe(child) for child in value]
     return value

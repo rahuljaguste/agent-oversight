@@ -104,7 +104,7 @@ Each audit record is one JSON line:
 | `policy_latency_ms` | Time spent in policy evaluation |
 | `approval_latency_ms` | Time spent waiting for human approval |
 
-Redaction is key-name based and best-effort: a value under a name such as `body`, `password`, `token`, `secret` or `authorization` is replaced with a length marker, including nested dicts and lists. The same known values are removed from the free-form `reason` and `error` text, and the terminal approval prompt shows the redacted arguments. Non-finite floats and lone surrogates are made strict-JSON-safe so the log cannot fail on serialisation.
+Redaction is key-name based and best-effort: a value under a name such as `body`, `password`, `token`, `secret` or `authorization` is replaced with a length marker, including nested dicts and lists. The same known values are removed from the free-form `reason` and `error` text, and the terminal approval prompt shows the redacted arguments. Values shorter than four characters are left in free-form text, because replacing them would corrupt the surrounding prose; argument values are redacted regardless of length. Non-finite floats and lone surrogates are made strict-JSON-safe so the log cannot fail on serialisation.
 
 ## Eval methodology
 

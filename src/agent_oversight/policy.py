@@ -250,6 +250,8 @@ def _validate_when(when: dict[str, Any], rule_name: str) -> None:
 
 
 def _validate_scalar(root: str, expected: Any, path: str, rule_name: str) -> None:
+    if expected is None:
+        raise ValueError(f"Null operand for {path!r} in rule {rule_name!r}; use 'exists: false'.")
     if isinstance(expected, (dict, list, tuple)):
         raise ValueError(f"Condition {path!r} must be a scalar in rule {rule_name!r}.")
     if isinstance(expected, float) and not math.isfinite(expected):
@@ -280,7 +282,11 @@ def _validate_operator(root: str, operator: str, expected: Any, path: str, rule_
     if operator in {"gt", "gte", "lt", "lte"}:
         if isinstance(expected, bool) or not isinstance(expected, (int, float)):
             raise ValueError(f"'{operator}' expects a number in rule {rule_name!r}.")
-        if not math.isfinite(float(expected)):
+        try:
+            finite = math.isfinite(float(expected))
+        except OverflowError:  # an int too large for float is not a usable threshold
+            finite = False
+        if not finite:
             raise ValueError(f"'{operator}' expects a finite number in rule {rule_name!r}.")
 
 
@@ -489,14 +495,6 @@ def _url_domains(text: str) -> list[str] | None:
             return None
         domains.append(host.lower().rstrip("."))
     return domains
-
-
-def _domain(value: Any) -> str:
-    """Extract a single domain, or return an empty string when ambiguous."""
-    domains = _domains(value)
-    if not domains or len(domains) != 1:
-        return ""
-    return domains[0]
 
 
 def _path_prefix(value: Any, expected: Any) -> bool:

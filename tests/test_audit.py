@@ -67,6 +67,7 @@ def test_redact_text_removes_known_values():
         {"path": "notes.txt", "subject": "\ud800"},
         {1: "x"},
         {b"x": "y"},
+        {"\ud800": "v"},
         {"count": float("nan")},
     ],
 )

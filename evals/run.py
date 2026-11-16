@@ -97,7 +97,9 @@ def _load_scenarios() -> list[dict]:
             raise SystemExit(f"Scenario {scenario_id!r} has a non-string 'user'.")
         if "reversible" in action and not isinstance(action["reversible"], bool):
             raise SystemExit(f"Scenario {scenario_id!r} has a non-boolean 'reversible'.")
-        if "impact" in action and action["impact"] not in _IMPACTS:
+        if "impact" in action and (
+            not isinstance(action["impact"], str) or action["impact"] not in _IMPACTS
+        ):
             raise SystemExit(f"Scenario {scenario_id!r} has an invalid 'impact'.")
 
         expected = str(scenario.get("expected", "")).lower()

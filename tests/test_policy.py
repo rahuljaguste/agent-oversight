@@ -246,6 +246,12 @@ def _write_policy(tmp_path: Path, text: str) -> Path:
         "version: 1\ndefault_decision: deny\ndefault_decision: allow\nrules: []\n",
         "version: 1\ndefault_decision: allow\nrules:\n  - name: r\n    decision: allow\n"
         "    when:\n      args.amount:\n        gt: 1\n        gt: 2\n",
+        "version: 1\ndefault_decision: allow\nrules:\n  - name: r\n    decision: allow\n"
+        "    when:\n      args.x: {eq: null}\n",
+        "version: 1\ndefault_decision: allow\nrules:\n  - name: r\n    decision: allow\n"
+        "    when:\n      args.x: {neq: null}\n",
+        "version: 1\ndefault_decision: allow\nrules:\n  - name: r\n    decision: allow\n"
+        "    when:\n      args.amount: {gt: " + "9" * 500 + "}\n",
     ],
 )
 def test_invalid_policies_are_rejected(tmp_path, text):
