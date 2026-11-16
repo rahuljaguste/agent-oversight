@@ -124,21 +124,21 @@ The review layer is in-process. This table measures the decision path, not the m
 
 | Case | Mode | p50 (µs) | p95 (µs) | p99 (µs) |
 |---|---|---:|---:|---:|
-| allow (`read_file`) | policy only | 3.96 | 4.12 | 4.38 |
-| allow (`read_file`) | review, no audit | 11.33 | 11.88 | 15.21 |
-| allow (`read_file`) | review + audit | 61.17 | 76.79 | 106.62 |
-| deny (external email) | policy only | 8.71 | 9.08 | 9.50 |
-| deny (external email) | review, no audit | 17.83 | 19.00 | 24.25 |
-| deny (external email) | review + audit | 69.79 | 81.38 | 124.42 |
-| approval (transfer 5000) | policy only | 1.62 | 1.67 | 1.75 |
-| approval (transfer 5000) | review, no audit | 13.25 | 13.83 | 17.67 |
-| approval (transfer 5000) | review + audit | 63.38 | 73.92 | 113.42 |
+| allow (`read_file`) | policy only | 3.96 | 4.12 | 4.83 |
+| allow (`read_file`) | review, no audit | 11.58 | 12.92 | 38.12 |
+| allow (`read_file`) | review + audit | 66.38 | 111.25 | 228.25 |
+| deny (external email) | policy only | 8.75 | 9.38 | 23.38 |
+| deny (external email) | review, no audit | 18.12 | 21.58 | 59.96 |
+| deny (external email) | review + audit | 73.92 | 118.17 | 263.75 |
+| approval (transfer 5000) | policy only | 1.62 | 1.71 | 1.83 |
+| approval (transfer 5000) | review, no audit | 13.42 | 16.08 | 39.75 |
+| approval (transfer 5000) | review + audit | 67.29 | 105.92 | 225.38 |
 
 Reproduce with `python benchmarks/latency.py`. Measured on an Apple M1 Pro, macOS 27.2.1, Python 3.15.0, with 20,000 iterations per case after 1,000 warm-up iterations in a single process. A second run reproduced these p50 values within a few percent; p95 and p99 are noisier, especially for the no-audit review rows, and should be read as indicative. The benchmark uses synthetic actions and no network or model calls.
 
 "Policy only" is `Policy.evaluate`. "Review, no audit" adds the reviewer, redaction and final decision with an in-memory approver. "Review + audit" additionally opens, serialises and appends one JSONL record per call. Auto-approval is effectively free, so the approval row does not include human latency.
 
-The audit write is the dominant local cost at about 50 µs per call, because the prototype opens the file for every record. A production control plane would buffer writes or ship records to a log service. The inline policy decision itself is about 2–9 µs at p50 on this machine; email-domain parsing is the slowest of the three cases.
+The audit write is the dominant local cost at about 55 µs per call, because the prototype opens the file for every record and sanitises every key and value. A production control plane would buffer writes or ship records to a log service. The inline policy decision itself is about 2–9 µs at p50 on this machine; email-domain parsing is the slowest of the three cases.
 
 ## Limitations
 
