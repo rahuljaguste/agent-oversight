@@ -24,6 +24,11 @@ dev = [
 [project.scripts]
 agent-oversight = "agent_oversight.cli:main"
 
+[project.urls]
+Homepage = "https://github.com/rahuljaguste/agent-oversight"
+Repository = "https://github.com/rahuljaguste/agent-oversight"
+Issues = "https://github.com/rahuljaguste/agent-oversight/issues"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/agent_oversight"]
 
